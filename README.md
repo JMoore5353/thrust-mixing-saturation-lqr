@@ -4,9 +4,13 @@ This repository is a ROS2 implementation of the 2017 RAL paper titled "Thrust Mi
 It is implemented to work with the [ROScopter](https://github.com/rosflight/roscopter.git) controller.
 
 ## Building and running
-Build this repository in a terminal (that has sourced ROS2) with
-
+Build and source this repository in a terminal (that has sourced ROS2) with
 ```
 colcon build
+source install/setup.zsh
 ```
 
+Run with:
+```
+ros2 run thrust_mixing_lqr lqr_rate_controller
+```

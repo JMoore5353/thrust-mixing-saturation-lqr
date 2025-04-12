@@ -1,0 +1,5 @@
+lqr_controller:
+  ros__parameters:
+    # LQR control parameters
+    Q: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    R: [1.0, 1.0, 1.0]

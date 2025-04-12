@@ -1,1 +1,9 @@
+.gitignore
 *.pdf
+
+# Don't include build files
+build/
+install/
+log/
+
+__pycache__/
