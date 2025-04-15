@@ -41,6 +41,15 @@ install(
   TARGETS lqr_rate_controller
   DESTINATION lib/${PROJECT_NAME})
 
+add_executable(rc_transcription
+  src/rc_transcription.cpp)
+ament_target_dependencies(rc_transcription
+  rclcpp
+  rosflight_msgs)
+install(
+  TARGETS rc_transcription
+  DESTINATION lib/${PROJECT_NAME})
+
 install(
   DIRECTORY params
   DESTINATION share/${PROJECT_NAME}

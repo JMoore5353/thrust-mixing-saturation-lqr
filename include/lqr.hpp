@@ -9,6 +9,7 @@
 
 #include "rosflight_msgs/msg/command.hpp"
 #include "roscopter_msgs/msg/state.hpp"
+#include "rosflight_msgs/msg/output_raw.hpp"
 
 namespace lqr_controller {
 
@@ -20,11 +21,13 @@ private:
   // ROS2 interfaces
   rclcpp::Subscription<rosflight_msgs::msg::Command>::SharedPtr command_sub_;
   rclcpp::Subscription<roscopter_msgs::msg::State>::SharedPtr state_sub_;
+  rclcpp::Subscription<rosflight_msgs::msg::OutputRaw>::SharedPtr pwm_sub_;
   rclcpp::Publisher<rosflight_msgs::msg::Command>::SharedPtr command_pub_;
   OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
 
   void declare_parameters();
   void state_callback(const roscopter_msgs::msg::State & msg);
+  void pwm_callback(const rosflight_msgs::msg::OutputRaw & msg);
   void command_callback(const rosflight_msgs::msg::Command & msg);
   void publish_command();
   /**
@@ -42,10 +45,11 @@ private:
   Eigen::Vector3d compute_n_des(Eigen::Vector3d omega_des);
   Eigen::Vector4d iterative_thrust_mixing(double c_des, Eigen::Vector3d eta_des);
   double compute_dt(double now);
-  Eigen::Vector4d force_to_pwm();
+  Eigen::Vector4d force_to_omega_squared();
 
   // Persistent variables
   roscopter_msgs::msg::State current_state_;
+  rosflight_msgs::msg::OutputRaw current_pwms_;
   Eigen::Vector3d omega_hat_ = Eigen::Vector3d::Zero();
   Eigen::Vector4d f_hat_ = Eigen::Vector4d::Zero();
   Eigen::Vector4d f_des_ = Eigen::Vector4d::Zero();
