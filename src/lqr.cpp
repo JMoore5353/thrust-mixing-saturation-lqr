@@ -44,8 +44,8 @@ LqrController::LqrController()
 void LqrController::declare_parameters()
 {
   this->declare_parameter("mass", 3.5);
-  this->declare_parameter("Q", std::vector<float>{1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
-  this->declare_parameter("R", std::vector<float>{40.0, 40.0, 400.0});
+  this->declare_parameter("Q", std::vector<float>{150.0, 150.0, 100.0, 10.0, 10.0, 10.0});
+  this->declare_parameter("R", std::vector<float>{10.0, 10.0, 10.0});
   this->declare_parameter("alpha_up", 0.011); // 11ms from the paper
   this->declare_parameter("alpha_down", 0.027); // 27ms from the paper
   this->declare_parameter("arm_length", 0.30); // Distance from the motor to the center of gravity
@@ -328,8 +328,6 @@ Eigen::Vector4d LqrController::iterative_thrust_mixing(double c_des, Eigen::Vect
   double initial_val = mass * c_des / 4.0;
   Eigen::Vector4d f_tmp(initial_val, initial_val, initial_val, initial_val);
 
-  std::cout << "F tmp: " << f_tmp << std::endl;
-
   // Iterate until convergence
   double previous_norm = -100.0;
   double threshold = this->get_parameter("iter_threshold").as_double();
@@ -350,8 +348,6 @@ Eigen::Vector4d LqrController::iterative_thrust_mixing(double c_des, Eigen::Vect
     // std::cout << "B" << std::endl << b << std::endl;
     f_tmp = F_.colPivHouseholderQr().solve(b);
 
-    std::cout << "F tmp " << iteration_count << ": " << f_tmp << std::endl;
-
     // Protect against eternal loops
     iteration_count += 1;
     if (iteration_count >= this->get_parameter("max_iters").as_int()) {
@@ -360,8 +356,6 @@ Eigen::Vector4d LqrController::iterative_thrust_mixing(double c_des, Eigen::Vect
       break;
     }
   }
-
-  std::cout << "________________" << std::endl;
 
   return f_tmp;
 }
