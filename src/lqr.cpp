@@ -32,10 +32,11 @@ LqrController::LqrController()
       1, 1, 1, 1;
   F_.row(0) *= sqrt(2) / 2 * this->get_parameter("arm_length").as_double();
   F_.row(1) *= sqrt(2) / 2 * this->get_parameter("arm_length").as_double();
-  F_.row(3) /= this->get_parameter("mass").as_double();
 
   // Load the inertia matrix
   J_ << 0.08, 0, 0, 0, 0.08, 0, 0, 0, 0.12;
+
+  compute_max_thrust();
 
   // Compute initial gains
   compute_lqr_gain();
@@ -61,6 +62,7 @@ void LqrController::declare_parameters()
   this->declare_parameter("gravity", 9.81);
   this->declare_parameter("max_iters", 3);
   this->declare_parameter("iter_threshold", 0.01);
+  this->declare_parameter("num_motors", 4);
 }
 
 rcl_interfaces::msg::SetParametersResult LqrController::parameters_callback(
@@ -107,6 +109,25 @@ rcl_interfaces::msg::SetParametersResult LqrController::parameters_callback(
 
   return result;
 } 
+
+void LqrController::compute_max_thrust()
+{
+  double CT = this->get_parameter("CT").as_double();
+  double CQ = this->get_parameter("CQ").as_double();
+  double D = this->get_parameter("D").as_double();
+  double rho = this->get_parameter("rho").as_double();
+  double KV = this->get_parameter("KV").as_double();
+  double V_max = this->get_parameter("V_max").as_double();
+  double i0 = this->get_parameter("i0").as_double();
+  double Res = this->get_parameter("motor_resistance").as_double();
+  double num_motors = this->get_parameter("num_motors").as_int();
+
+  double a = Res * rho * pow(D, 5.0) * CQ / (4 * M_PI * M_PI * KV);
+  double b = KV;
+  double c = i0 * Res - V_max;
+  double omega = (-b + sqrt(pow(b, 2.0) - 4*a*c)) / (2*a);
+  max_thrust_ = rho * pow(D, 4.0) * CT * pow(omega, 2.0) / (4 * M_PI * M_PI) * num_motors;
+}
 
 void LqrController::compute_lqr_gain()
 {
@@ -199,7 +220,8 @@ void LqrController::command_callback(const rosflight_msgs::msg::Command & msg)
 
   // Parse input command
   Eigen::Vector3d omega_des(msg.qx, msg.qy, msg.qz);
-  double c_des = msg.fz * this->get_parameter("gravity").as_double(); // Mass normalized thrust (throttle 0-1)
+  double throttle_des = msg.fz; // Throttle
+  double c_des = throttle_des * max_thrust_ / this->get_parameter("mass").as_double(); // Mass normalized thrust
 
   // std::cout << "omega_des" << std::endl << omega_des << std::endl;
 

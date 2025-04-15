@@ -42,6 +42,7 @@ private:
     const std::vector<rclcpp::Parameter> & parameters);
 
 
+  void compute_max_thrust();
   void compute_lqr_gain();
   void estimate_lqr_state();
   double compute_rotor_torque_constant(int idx, double f);
@@ -59,6 +60,7 @@ private:
   Eigen::Vector4d f_des_ = Eigen::Vector4d::Zero();
   Eigen::Vector3d eta_hat_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d omega_dot_des_ = Eigen::Vector3d::Zero();
+  double max_thrust_ = 0.0;
 
   // Matrices describing rotor geometry and inertia parameters
   Eigen::Matrix4d F_ = Eigen::Matrix4d::Zero();
