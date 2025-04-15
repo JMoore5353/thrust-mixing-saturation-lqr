@@ -25,7 +25,7 @@ private:
 
     out.header.stamp = this->get_clock()->now();
     out.mode = rosflight_msgs::msg::Command::MODE_ROLLRATE_PITCHRATE_YAWRATE_THROTTLE;
-    out.fz = ((double) msg.values[2] - 1000) / 300;
+    out.fz = ((double) msg.values[2] - 1000) / 500;
     out.qx = ((double) msg.values[0] - 1500) / 500;
     out.qy = ((double) msg.values[1] - 1500) / 500;
     out.qz = ((double) msg.values[3] - 1500) / 500;

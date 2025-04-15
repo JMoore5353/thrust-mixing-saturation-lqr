@@ -19,8 +19,6 @@ find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(std_srvs REQUIRED)
-find_package(sensor_msgs REQUIRED)
 find_package(roscopter_msgs REQUIRED)
 find_package(rosflight_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -36,6 +34,7 @@ ament_target_dependencies(lqr_rate_controller
   rclcpp
   rosflight_msgs
   roscopter_msgs
+  geometry_msgs
 )
 install(
   TARGETS lqr_rate_controller

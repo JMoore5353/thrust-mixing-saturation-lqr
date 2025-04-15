@@ -18,6 +18,8 @@ LqrController::LqrController()
     "estimated_state", 10, std::bind(&LqrController::state_callback, this, std::placeholders::_1));
   pwm_sub_ = this->create_subscription<rosflight_msgs::msg::OutputRaw>(
     "output_raw", 1, std::bind(&LqrController::pwm_callback, this, std::placeholders::_1));
+  forces_sub_ = this->create_subscription<geometry_msgs::msg::TwistStamped>(
+    "forces_and_moments", 1, std::bind(&LqrController::forces_callback, this, std::placeholders::_1));
   command_pub_ = this->create_publisher<rosflight_msgs::msg::Command>(
     "command_lqr", 1);
 
@@ -42,20 +44,18 @@ LqrController::LqrController()
 void LqrController::declare_parameters()
 {
   this->declare_parameter("mass", 3.5);
-  this->declare_parameter("Q", std::vector<float>{2.0, 2.0, 2.0, 1.0, 12.0, 1.0});
-  this->declare_parameter("R", std::vector<float>{1.0, 1.0, 4.0});
+  this->declare_parameter("Q", std::vector<float>{1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
+  this->declare_parameter("R", std::vector<float>{40.0, 40.0, 400.0});
   this->declare_parameter("alpha_up", 0.011); // 11ms from the paper
   this->declare_parameter("alpha_down", 0.027); // 27ms from the paper
-  this->declare_parameter("arm_length", 0.45); // Distance from the motor to the center of gravity
-  this->declare_parameter("k_0_f", 0.0);
-  this->declare_parameter("max_thrust", 2.62*4);
+  this->declare_parameter("arm_length", 0.30); // Distance from the motor to the center of gravity
   this->declare_parameter("print_debug", true);
   this->declare_parameter("CT", 0.08);
   this->declare_parameter("CQ", 0.0043);
   this->declare_parameter("D", 0.381);
   this->declare_parameter("rho", 1.225);
   this->declare_parameter("KV", 0.02894);
-  this->declare_parameter("V_max", 26.2);
+  this->declare_parameter("V_max", 25.0);
   this->declare_parameter("i0", 1.01);
   this->declare_parameter("motor_resistance", 0.085);
   this->declare_parameter("gravity", 9.81);
@@ -116,8 +116,8 @@ void LqrController::compute_lqr_gain()
   Eigen::DiagonalMatrix<double, 3, 3> eye_alpha(val, val, val);
 
   A_.topLeftCorner(6,3) = Eigen::Matrix<double, 6, 3>::Zero();
-  A_.topRightCorner(3,3) = J_;
-  A_.bottomRightCorner(3,3) = eye_alpha;
+  A_.topRightCorner(3,3) = J_.inverse();
+  A_.bottomRightCorner(3,3) = -1*eye_alpha;
   
   B_.topLeftCorner(3,3) = Eigen::Matrix3d::Zero();
   B_.bottomLeftCorner(3,3) = eye_alpha;
@@ -149,17 +149,17 @@ void LqrController::compute_lqr_gain()
     }
   }
 
-  if (this->get_parameter("print_debug").as_bool()) {
-    RCLCPP_INFO_STREAM(this->get_logger(), "V_stab" << std::endl << V_stab);
-  }
+  // if (this->get_parameter("print_debug").as_bool()) {
+  //   RCLCPP_INFO_STREAM(this->get_logger(), "V_stab" << std::endl << V_stab);
+  // }
 
   // Compute P (solution to ARE)!
   Eigen::Matrix<double, 6, 6> P;
   P = V_stab.bottomLeftCorner(6,6) * V_stab.topLeftCorner(6,6).inverse();
 
-  if (this->get_parameter("print_debug").as_bool()) {
-    RCLCPP_INFO_STREAM(this->get_logger(), "P" << std::endl << P);
-  }
+  // if (this->get_parameter("print_debug").as_bool()) {
+  //   RCLCPP_INFO_STREAM(this->get_logger(), "P" << std::endl << P);
+  // }
 
   // Compute LQR gain
   K_LQR_ = R_.inverse() * B_.transpose() * P;
@@ -175,6 +175,11 @@ void LqrController::state_callback(const roscopter_msgs::msg::State & msg)
 void LqrController::pwm_callback(const rosflight_msgs::msg::OutputRaw & msg)
 {
   current_pwms_ = msg;
+}
+
+void LqrController::forces_callback(const geometry_msgs::msg::TwistStamped & msg)
+{
+  current_forces_ = msg;
 }
 
 void LqrController::command_callback(const rosflight_msgs::msg::Command & msg)
@@ -196,18 +201,21 @@ void LqrController::command_callback(const rosflight_msgs::msg::Command & msg)
   Eigen::Vector3d omega_des(msg.qx, msg.qy, msg.qz);
   double c_des = msg.fz * this->get_parameter("gravity").as_double(); // Mass normalized thrust (throttle 0-1)
 
-  std::cout << "omega_des" << std::endl << omega_des << std::endl;
+  // std::cout << "omega_des" << std::endl << omega_des << std::endl;
 
   // Estimate f_i and omega
   estimate_lqr_state();
+  // std::cout << "Eta hat: " << eta_hat_ << std::endl;
 
   // Compute LQR control, n_des
   Eigen::Vector3d n_des = compute_n_des(omega_des);
 
-  std::cout << n_des << std::endl;
+  // std::cout << n_des << std::endl;
 
   // Iterative mixer for the first pass
   f_des_ = iterative_thrust_mixing(c_des, n_des);
+  // std::cout << "f_des: " << std::endl << f_des_ << std::endl;
+  // std::cout << "_______________" << std::endl;
 
   // Prioritized input saturation
 
@@ -222,26 +230,31 @@ void LqrController::estimate_lqr_state()
   omega_hat_(1) = current_state_.q;
   omega_hat_(2) = current_state_.r;
 
+  // Estimate eta_hat
+  eta_hat_(0) = current_forces_.twist.angular.x;
+  eta_hat_(1) = current_forces_.twist.angular.y;
+  eta_hat_(2) = current_forces_.twist.angular.z;
+
   // Estimate the body torqes from the pwm signals sent to the motors
-  double rho = this->get_parameter("rho").as_double();
-  double CT = this->get_parameter("CT").as_double();
-  double CQ = this->get_parameter("CQ").as_double();
-  double Res = this->get_parameter("motor_resistance").as_double();
-  double KV = this->get_parameter("KV").as_double();
-  double D = this->get_parameter("D").as_double();
-  double i0 = this->get_parameter("i0").as_double();
-  double vmax = this->get_parameter("V_max").as_double();
-  for (int i=0; i<4; ++i) {
-    // Eq 4.22 Small Unmanned Aircraft
-    double vin = vmax * current_pwms_.values[i];
-
-    double a = -rho * pow(D, 5.0) * CQ / (4*M_PI*M_PI);
-    double b = -KV*KV/Res;
-    double c = KV*vin/Res - KV*i0;
-    double omega_p = (-b - sqrt(pow(b,2.0) - 4*a*c)) / (2*a);
-
-    f_hat_(i) = CT*rho*pow(D, 4.0) / (4*M_PI*M_PI) * pow(omega_p, 2.0);
-  }
+  // double rho = this->get_parameter("rho").as_double();
+  // double CT = this->get_parameter("CT").as_double();
+  // double CQ = this->get_parameter("CQ").as_double();
+  // double Res = this->get_parameter("motor_resistance").as_double();
+  // double KV = this->get_parameter("KV").as_double();
+  // double D = this->get_parameter("D").as_double();
+  // double i0 = this->get_parameter("i0").as_double();
+  // double vmax = this->get_parameter("V_max").as_double();
+  // for (int i=0; i<4; ++i) {
+  //   // Eq 4.22 Small Unmanned Aircraft
+  //   double vin = vmax * current_pwms_.values[i];
+  //
+  //   double a = -rho * pow(D, 5.0) * CQ / (4*M_PI*M_PI);
+  //   double b = -KV*KV/Res;
+  //   double c = KV*vin/Res - KV*i0;
+  //   double omega_p = (-b - sqrt(pow(b,2.0) - 4*a*c)) / (2*a);
+  //
+  //   f_hat_(i) = CT*rho*pow(D, 4.0) / (4*M_PI*M_PI) * pow(omega_p, 2.0);
+  // }
 
   // TODO: This is blowing up... How else do we estimate eta_hat?
   // Estimate body torques produced by the motors
@@ -296,18 +309,15 @@ double LqrController::compute_rotor_torque_constant(int idx, double f)
 
 Eigen::Vector3d LqrController::compute_n_des(Eigen::Vector3d omega_des)
 {
+  // Eq 6
+  Eigen::Vector3d eta_ref = omega_des.cross(J_ * omega_des) + J_ * omega_dot_des_;
+
   // Form state vector (Eq. 12)
   Eigen::Matrix<double, 6, 1> error_state;
-  error_state << omega_des - omega_hat_, eta_ref_ - eta_hat_;
+  error_state << omega_des - omega_hat_, eta_ref - eta_hat_;
 
   // Compute desired body torques (Eq. 12)
   Eigen::Vector3d n_des = K_LQR_ * error_state + omega_hat_.cross(J_ * omega_hat_) + J_ * omega_dot_des_;
-  RCLCPP_INFO_STREAM(this->get_logger(), "OMEGA HAT" << std::endl << omega_hat_);
-  RCLCPP_INFO_STREAM(this->get_logger(), "eta_ref_" << std::endl << eta_ref_);
-  RCLCPP_INFO_STREAM(this->get_logger(), "eta HAT" << std::endl << eta_hat_);
-  RCLCPP_INFO_STREAM(this->get_logger(), K_LQR_ * error_state);
-  RCLCPP_INFO_STREAM(this->get_logger(), omega_hat_.cross(J_ * omega_hat_));
-  RCLCPP_INFO_STREAM(this->get_logger(), J_ * omega_dot_des_);
   return n_des;
 }
 
@@ -318,8 +328,10 @@ Eigen::Vector4d LqrController::iterative_thrust_mixing(double c_des, Eigen::Vect
   double initial_val = mass * c_des / 4.0;
   Eigen::Vector4d f_tmp(initial_val, initial_val, initial_val, initial_val);
 
+  std::cout << "F tmp: " << f_tmp << std::endl;
+
   // Iterate until convergence
-  double previous_norm = -1.0;
+  double previous_norm = -100.0;
   double threshold = this->get_parameter("iter_threshold").as_double();
   int iteration_count = 0;
   while (f_tmp.norm() - previous_norm > threshold) {
@@ -335,8 +347,10 @@ Eigen::Vector4d LqrController::iterative_thrust_mixing(double c_des, Eigen::Vect
     // Solve the equations for f_i
     Eigen::Vector4d b;
     b << eta_des, c_des * mass;
-    std::cout << "B" << std::endl << b << std::endl;
+    // std::cout << "B" << std::endl << b << std::endl;
     f_tmp = F_.colPivHouseholderQr().solve(b);
+
+    std::cout << "F tmp " << iteration_count << ": " << f_tmp << std::endl;
 
     // Protect against eternal loops
     iteration_count += 1;
@@ -346,6 +360,8 @@ Eigen::Vector4d LqrController::iterative_thrust_mixing(double c_des, Eigen::Vect
       break;
     }
   }
+
+  std::cout << "________________" << std::endl;
 
   return f_tmp;
 }
@@ -392,11 +408,28 @@ Eigen::Vector4d LqrController::force_to_omega_squared()
   double rho = this->get_parameter("rho").as_double();
   double D = this->get_parameter("D").as_double();
   double CT = this->get_parameter("CT").as_double();
+  double V_max = this->get_parameter("V_max").as_double();
+  double KV = this->get_parameter("KV").as_double();
+  double CQ = this->get_parameter("CQ").as_double();
+  double Res = this->get_parameter("motor_resistance").as_double();
+  double i0 = this->get_parameter("i0").as_double();
 
   // Equation from Chap 4 of Small Unmanned Aircraft
   Eigen::Vector4d out;
   for (int i=0; i<4; ++i) {
-    out(i) = 4 * M_PI * M_PI * f_des_(i) / (rho * pow(D, 4.0) * CT);
+    double omega_squared = 4 * M_PI * M_PI * f_des_(i) / (rho * pow(D, 4.0) * CT);
+
+    if (omega_squared < 0.0) {
+      omega_squared = 0.0;
+    }
+
+    // Ch. 4, setting equation for torque produced by a propeller equal to Eq. 4.19
+    // Note that we assume constant advance ratio, leading to constant torque and thrust constants.
+    float V_in = rho * pow(D, 5.0) / (4.0 * pow(M_PI, 2.0)) * omega_squared * CQ * Res / KV
+      + Res * i0 + KV * sqrt(omega_squared);
+
+    // Convert desired V_in setting to a throttle setting
+    out(i) = V_in / V_max;
   }
 
   return out;

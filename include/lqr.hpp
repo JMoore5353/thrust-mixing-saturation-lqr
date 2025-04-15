@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/QR>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <vector>
 #include <iostream>
@@ -22,12 +23,14 @@ private:
   rclcpp::Subscription<rosflight_msgs::msg::Command>::SharedPtr command_sub_;
   rclcpp::Subscription<roscopter_msgs::msg::State>::SharedPtr state_sub_;
   rclcpp::Subscription<rosflight_msgs::msg::OutputRaw>::SharedPtr pwm_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr forces_sub_;
   rclcpp::Publisher<rosflight_msgs::msg::Command>::SharedPtr command_pub_;
   OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
 
   void declare_parameters();
   void state_callback(const roscopter_msgs::msg::State & msg);
   void pwm_callback(const rosflight_msgs::msg::OutputRaw & msg);
+  void forces_callback(const geometry_msgs::msg::TwistStamped & msg);
   void command_callback(const rosflight_msgs::msg::Command & msg);
   void publish_command();
   /**
@@ -50,12 +53,12 @@ private:
   // Persistent variables
   roscopter_msgs::msg::State current_state_;
   rosflight_msgs::msg::OutputRaw current_pwms_;
+  geometry_msgs::msg::TwistStamped current_forces_;
   Eigen::Vector3d omega_hat_ = Eigen::Vector3d::Zero();
   Eigen::Vector4d f_hat_ = Eigen::Vector4d::Zero();
   Eigen::Vector4d f_des_ = Eigen::Vector4d::Zero();
   Eigen::Vector3d eta_hat_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d omega_dot_des_ = Eigen::Vector3d::Zero();
-  Eigen::Vector3d eta_ref_ = Eigen::Vector3d::Zero();
 
   // Matrices describing rotor geometry and inertia parameters
   Eigen::Matrix4d F_ = Eigen::Matrix4d::Zero();

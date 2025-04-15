@@ -8,11 +8,11 @@ alpha = (0.011 + 0.027) / 2 # From paper
 
 A = np.vstack((
         np.hstack((np.zeros((3,3)), J_inv)),
-        np.hstack((np.zeros((3,3)), np.eye(3)/alpha))
+        np.hstack((np.zeros((3,3)), -np.eye(3)/alpha))
 ))
 B = np.vstack((np.zeros((3,3)), np.eye(3) / alpha))
-Q = np.diag([2, 2, 2, 1, 12, 1.0])
-R = np.diag([1, 1, 4.0])
+Q = np.diag([1, 1, 1, 1, 1, 1.0])
+R = np.diag([40, 40, 400.0])
 
 P = solve_continuous_are(A, B, Q, R)
 print("p")
