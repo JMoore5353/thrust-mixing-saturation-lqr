@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <Eigen/Core>
@@ -48,6 +49,11 @@ private:
   double compute_rotor_torque_constant(int idx, double f);
   Eigen::Vector3d compute_n_des(Eigen::Vector3d omega_des);
   Eigen::Vector4d iterative_thrust_mixing(double c_des, Eigen::Vector3d eta_des);
+  Eigen::Vector4d input_saturation(Eigen::Vector4d f_des, Eigen::Vector3d eta_des, double c_des);
+  int find_biggest_violation(Eigen::Vector4d f_des);
+  bool check_both_limits(Eigen::Vector4d f_des);
+  Eigen::Vector4d collective_thrust_saturation(Eigen::Vector4d f_des);
+  Eigen::Vector4d yaw_saturation(Eigen::Vector4d f_des, Eigen::Vector3d eta_des, double c_des, int current_max);
   double compute_dt(double now);
   Eigen::Vector4d force_to_omega_squared();
 
@@ -74,10 +80,14 @@ private:
   Eigen::Matrix<double, 12, 12> H_;
   Eigen::Matrix<double, 3, 6> K_LQR_;
 
+  // Input saturation variables
+  double f_max_ = 0.0;
+  double f_min_ = 0.0;
+
   // Time variables
   double prev_time_ = 0;
 
-  // Flag
+  // Flags
   bool controller_parameters_changed_ = false;
 };
 

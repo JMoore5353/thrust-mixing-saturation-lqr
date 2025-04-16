@@ -64,6 +64,10 @@ void LqrController::declare_parameters()
   this->declare_parameter("iter_threshold", 0.01);
   this->declare_parameter("num_motors", 4);
   this->declare_parameter("use_throttle", false);
+  this->declare_parameter("f_max_limit", 0.9);  // Percentage of max thrust
+  this->declare_parameter("f_min_limit", 0.01);  // Percentage of max thrust
+  this->declare_parameter("assured_yaw_torque", 0.2); // Nm
+  this->declare_parameter("use_prioritized_input_sat", true);
 }
 
 rcl_interfaces::msg::SetParametersResult LqrController::parameters_callback(
@@ -128,6 +132,9 @@ void LqrController::compute_max_thrust()
   double c = i0 * Res - V_max;
   double omega = (-b + sqrt(pow(b, 2.0) - 4*a*c)) / (2*a);
   max_thrust_ = rho * pow(D, 4.0) * CT * pow(omega, 2.0) / (4 * M_PI * M_PI) * num_motors;
+
+  f_max_ = max_thrust_ / num_motors * this->get_parameter("f_max_limit").as_double();
+  f_min_ = max_thrust_ / num_motors * this->get_parameter("f_min_limit").as_double();
 }
 
 void LqrController::compute_lqr_gain()
@@ -215,6 +222,7 @@ void LqrController::command_callback(const rosflight_msgs::msg::Command & msg)
 
   // Check to see if the ROS2 parameters have changed (if we need to recompute K_LQR_)
   if (controller_parameters_changed_) {
+    compute_max_thrust();
     compute_lqr_gain();
     controller_parameters_changed_ = false;
   }
@@ -242,11 +250,12 @@ void LqrController::command_callback(const rosflight_msgs::msg::Command & msg)
   // std::cout << n_des << std::endl;
 
   // Iterative mixer for the first pass
-  f_des_ = iterative_thrust_mixing(c_des, n_des);
+  Eigen::Vector4d f_des = iterative_thrust_mixing(c_des, n_des);
   // std::cout << "f_des: " << std::endl << f_des_ << std::endl;
   // std::cout << "_______________" << std::endl;
 
   // Prioritized input saturation
+  f_des_ = input_saturation(f_des, n_des, c_des);
 
   // Send final prioritized command to the firmware
   publish_command();
@@ -387,6 +396,146 @@ Eigen::Vector4d LqrController::iterative_thrust_mixing(double c_des, Eigen::Vect
   }
 
   return f_tmp;
+}
+
+int LqrController::find_biggest_violation(Eigen::Vector4d f_des)
+{
+  int current_max = -1;
+  double current_error = 0.0;
+  for (int i=0; i<4; ++i) {
+    if (f_des(i) > f_max_) {
+      double error = abs(f_des(i) - f_max_);
+      if (current_max == -1 || error > current_error) {
+        current_max = i;
+        current_error = error;
+      }
+    } else if (f_des(i) < f_min_) {
+      double error = abs(f_des(i) - f_min_);
+      if (current_max == -1 || error > current_error) {
+        current_max = i;
+        current_error = error;
+      }
+    }
+  }
+
+  return current_max;
+}
+
+bool LqrController::check_both_limits(Eigen::Vector4d f_des)
+{
+  bool upper_limit_reached = false;
+  bool lower_limit_reached = false;
+  for (int i=0; i<4; ++i) {
+    if (f_des(i) > f_max_) {
+      upper_limit_reached = true;
+    } else if (f_des(i) < f_min_) {
+      lower_limit_reached = true;
+    }
+  }
+
+  return upper_limit_reached && lower_limit_reached;
+}
+
+Eigen::Vector4d LqrController::collective_thrust_saturation(Eigen::Vector4d f_des)
+{
+  int current_max = find_biggest_violation(f_des);
+  if (current_max == -1) {
+    return f_des;
+  }
+
+  // Not possible to fix by collective saturation if true
+  if (check_both_limits(f_des)) { 
+    return f_des;
+  }
+
+  double error = 0.0;
+  if (f_des(current_max) < f_min_) {
+    error = f_des(current_max) - f_min_;
+  } else {
+    error = f_max_ - f_des(current_max);
+  }
+
+  f_des = f_des.array() - error; // Shift all by the same amount
+  return f_des;
+}
+
+Eigen::Vector4d LqrController::yaw_saturation(Eigen::Vector4d f_des, Eigen::Vector3d eta_des, double c_des, int current_max)
+{
+  // Check to see if we are below n_assured
+  // TODO: Change to a percentage of commanded yaw torque
+  // if (abs(eta_des(2)) <= this->get_parameter("assured_yaw_torque").as_double()) {
+  //   return f_des;
+  // }
+
+  double f_i = f_max_;
+  if (f_des(current_max) < f_min_) { f_i = f_min_; }
+
+  // Set up solver
+  Eigen::Vector4d b;
+  Eigen::Matrix4d A = F_;
+  b << eta_des, c_des * this->get_parameter("mass").as_double();
+
+  // TODO: Iterative thrust mixing
+  b = b - f_i * A.col(current_max);  // Move ith col over to the other side of Ax = b
+  A.col(current_max) = Eigen::Vector4d::Zero();  // Subtract that same col from the col of F
+  A(2, current_max) = 1; // Set the (2,i) component to be 1
+  b(2) -= eta_des(2); // Subtract eta_z from b (i.e. move it to the other side)
+
+  // Solve
+  Eigen::Vector4d new_vals = A.colPivHouseholderQr().solve(b);
+
+  // Reinterpret values from new_vals
+  for (int i=0; i<4; ++i) {
+    if (i == current_max) {
+      f_des(i) = f_i;
+      eta_des(2) = new_vals(i);
+    } else {
+      f_des(i) = new_vals(i);
+    }
+  }
+
+  // TODO: Check if we pass n_assured
+
+  return f_des;
+}
+
+Eigen::Vector4d LqrController::input_saturation(Eigen::Vector4d f_des, Eigen::Vector3d eta_des, double c_des)
+{
+  std::cout << "INPUT SATURATION" << std::endl;
+  std::cout << "f_des: " << f_des.transpose() << std::endl;
+
+  if (this->get_parameter("use_prioritized_input_sat").as_bool()) {
+    // If no motors were saturated, return f_des.
+    int current_max = find_biggest_violation(f_des);
+    if (current_max == -1) { return f_des; }
+
+    std::cout << "Motor that is too big: " << current_max << std::endl;
+    std::cout << f_des.transpose() << std::endl;
+
+    // Yaw torque saturation
+    f_des = yaw_saturation(f_des, eta_des, c_des, current_max);
+
+    std::cout << "after yaw sat" << std::endl;
+    std::cout << f_des.transpose() << std::endl;
+
+    // Collective thrust saturation
+    f_des = collective_thrust_saturation(f_des);
+
+    std::cout << "after thrust sat" << std::endl;
+    std::cout << f_des.transpose() << std::endl;
+  }
+
+  // Clipping
+  for (int i=0; i<4; ++i) {
+    f_des(i) = std::min(f_des(i), f_max_);
+    f_des(i) = std::max(f_des(i), f_min_);
+  }
+
+  std::cout << "after clipping" << std::endl;
+  std::cout << f_des.transpose() << std::endl;
+  std::cout << "__________________" << std::endl;
+
+  return f_des;
 }
 
 void LqrController::publish_command()
