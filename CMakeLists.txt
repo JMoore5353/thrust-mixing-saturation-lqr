@@ -23,7 +23,7 @@ find_package(roscopter_msgs REQUIRED)
 find_package(rosflight_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 
-# Create executable
+# Create LQR executable
 add_executable(lqr_rate_controller
   src/lqr.cpp)
 target_include_directories(lqr_rate_controller
@@ -40,6 +40,7 @@ install(
   TARGETS lqr_rate_controller
   DESTINATION lib/${PROJECT_NAME})
 
+# RC transcription executable
 add_executable(rc_transcription
   src/rc_transcription.cpp)
 ament_target_dependencies(rc_transcription
@@ -47,6 +48,21 @@ ament_target_dependencies(rc_transcription
   rosflight_msgs)
 install(
   TARGETS rc_transcription
+  DESTINATION lib/${PROJECT_NAME})
+
+# TrajectoryCommand transcription executable
+add_executable(trajectory_transcription
+  src/simple_pid.cpp
+  src/trajectory_follower_transcription.cpp)
+target_include_directories(trajectory_transcription
+  PRIVATE
+    include)
+ament_target_dependencies(trajectory_transcription
+  rclcpp
+  roscopter_msgs
+  rosflight_msgs)
+install(
+  TARGETS trajectory_transcription
   DESTINATION lib/${PROJECT_NAME})
 
 install(

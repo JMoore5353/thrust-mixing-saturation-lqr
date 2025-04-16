@@ -63,6 +63,7 @@ void LqrController::declare_parameters()
   this->declare_parameter("max_iters", 3);
   this->declare_parameter("iter_threshold", 0.01);
   this->declare_parameter("num_motors", 4);
+  this->declare_parameter("use_throttle", false);
 }
 
 rcl_interfaces::msg::SetParametersResult LqrController::parameters_callback(
@@ -220,8 +221,14 @@ void LqrController::command_callback(const rosflight_msgs::msg::Command & msg)
 
   // Parse input command
   Eigen::Vector3d omega_des(msg.qx, msg.qy, msg.qz);
-  double throttle_des = msg.fz; // Throttle
-  double c_des = throttle_des * max_thrust_ / this->get_parameter("mass").as_double(); // Mass normalized thrust
+
+  double c_des = 0.0;
+  if (this->get_parameter("use_throttle").as_bool()) {
+    double throttle_des = msg.fz; // Throttle
+    c_des = throttle_des * max_thrust_ / this->get_parameter("mass").as_double(); // Mass normalized thrust
+  } else {
+    c_des = msg.fz / this->get_parameter("mass").as_double(); // Msg contains total desired thrust
+  }
 
   // std::cout << "omega_des" << std::endl << omega_des << std::endl;
 
